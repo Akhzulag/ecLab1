@@ -42,8 +42,8 @@ impl EC {
     pub fn on_curve(&self, p: &Point) -> bool {
         match (&p.x, &p.y, &p.z) {
             (Some(x), Some(y), None) => {
-                let left = (bui::pow(y, 2)) % &self.q;
-                let right = (bui::pow(x, 3) + &self.a * x + &self.b) % &self.q;
+                let left = y.modpow(&bui::from_str("2").unwrap(), &self.q);
+                let right = (x.pow(3) + &self.a * x + &self.b) % &self.q;
                 right == left
             }
             (_, _, _) => self.on_curve(&self.convert(p).expect("problem on curve")),
@@ -147,7 +147,6 @@ impl EC {
         let mut r_0 = Point::new(bui::zero(), bui::one(), Some(bui::zero()));
         let mut r_1 = p.clone();
         let bitstring = format!("{:b}", k);
-        // println!("{:?}", bitstring);
         let bitstring = bitstring.chars();
         for i in bitstring {
             if i == '0' {
@@ -178,31 +177,87 @@ impl EC {
             .unwrap(),
         );
 
-        let g = Point::new(
-            bui::from_str(
-                "48439561293906451759052585252797914202762949526041747995844080717082404635286",
-            )
-            .unwrap(),
-            bui::from_str(
-                "36134250956749795798585127919587881956611106672985015071877198253568414405109",
-            )
-            .unwrap(),
-            Some(bui::from_str("1").unwrap()),
-        );
-
-        let n = bui::from_str(
-            "115792089210356248762697446949407573529996955224135760342422259061068512044369",
-        )
-        .unwrap();
         let mut rng = rand::thread_rng();
-        let k: bui = rng.gen_bigint_range(&bui::one(), &n);
+        loop {
+            let x_0 = rng.gen_bigint_range(&bui::one(), &ec.q);
+            let x = (x_0.pow(3) + &ec.a * &x_0 + &ec.b) % &ec.q;
 
-        (ec.scalar_mul(&g, k), ec)
+            if legendre_symbol(&x, &ec.q) == bui::one() {
+                let y = solve(&x, &ec.q);
+                break (Point::new(x_0, y, Some(bui::one())), ec);
+            }
+        }
     }
 }
 
 fn modulo(a: &bui, n: &bui) -> bui {
     ((a % n) + n) % n
+}
+
+use num_bigint::ToBigInt;
+
+fn legendre_symbol(a: &bui, p: &bui) -> bui {
+    let pow = p - &bui::one();
+    let pow: bui = pow / 2;
+    let r = a.modpow(&pow, p);
+    if r == p - 1 {
+        return -1.to_bigint().unwrap();
+    }
+
+    r
+}
+
+fn solve(x: &bui, p: &bui) -> bui {
+    let mut q = p - 1;
+    let mut s = 0;
+    while (&q & bui::one()) != bui::one() {
+        q >>= 1;
+        s += 1;
+    }
+    println!("Q: {q}, S: {s}");
+    if s == 1 {
+        // let pow = &p + 1;
+        // let pow = &pow >> 2;
+        return x.modpow(&((p + 1) >> 2), p);
+    }
+
+    let mut rng = rand::thread_rng();
+    let z = loop {
+        let k: bui = rng.gen_bigint_range(&bui::one(), &q);
+        if legendre_symbol(&k, p) == -1.to_bigint().unwrap() {
+            break k;
+        }
+    };
+
+    let mut c = z.modpow(&q, p);
+
+    let mut r = x.modpow(&((&q + 1) >> 1), p);
+
+    let mut t = x.modpow(&q, p);
+
+    let mut m = s;
+
+    loop {
+        if t == bui::one() {
+            break r;
+        }
+
+        let mut i = 0;
+
+        let i = loop {
+            if t.modpow(&(2 >> i).to_bigint().unwrap(), p) == bui::one() {
+                break i;
+            }
+            i += 1;
+        };
+
+        let b = c.modpow(&((2 >> (m - i - 1)).to_bigint().unwrap()), p);
+
+        r = (r * &b) % p;
+        t = (t * b.pow(2)) % p;
+        c = b.pow(2) % p;
+        m = i;
+    }
 }
 
 #[cfg(test)]
@@ -215,13 +270,14 @@ mod tests {
         let (p1, _) = EC::gen_point_p256();
         let p2 = p1.clone();
 
-        assert!(p1.cmp(&p2)); // Точки мають бути рівними
+        assert!(p1.cmp(&p2));
     }
 
     #[test]
     fn test_ec_on_curve() {
         for _ in 0..1000 {
             let (p, ec) = EC::gen_point_p256();
+            println!("{:?}", p);
             assert!(ec.on_curve(&p));
         }
     }
