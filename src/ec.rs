@@ -283,6 +283,16 @@ mod tests {
     }
 
     #[test]
+    fn test_ec_on_curve2() {
+        for _ in 0..1000 {
+            let (p, ec) = EC::gen_point_p256();
+            println!("{:?}", p);
+            let p = ec.double(&p).unwrap();
+            assert!(ec.on_curve(&p));
+        }
+    }
+
+    #[test]
     fn test_ec_add_double() {
         for _ in 0..1000 {
             let (p1, ec) = EC::gen_point_p256();
